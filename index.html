@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat Application</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+    <div id="container">
+        <div id="chat">
+            <ul id="messages"></ul>
+            <textarea name="message" id="input-message" placeholder="Type a message..."></textarea>
+            <button id="send">Send</button>
+        </div>
+        <div id="system-prompt">
+            <label for="input-prompt">System Prompt</label>
+            <textarea name="prompt" id="input-prompt" cols="30" rows="10"
+                placeholder="Enter a prompt preamble...">Your name is MinChun. You are a helpful coding assistant.</textarea>
+        </div>
+    </div>
+
+
+
+
+    <script>
+        function showLoadingIndicator() {
+            const loadingIndicator = document.createElement('div');
+            loadingIndicator.className = 'dot-flashing';
+            loadingIndicator.id = 'loading-indicator';
+            return loadingIndicator;
+        }
+        function clearLoadingIndicator(result) {
+            const loadingIndicator = document.getElementById('loading-indicator');
+            if (loadingIndicator) {
+                loadingIndicator.removeAttribute('id');
+                loadingIndicator.removeAttribute('class');
+                if (typeof result === 'string') {
+                    const contentWithBreaks = result.replace(/\n/g, '<br>');
+                    loadingIndicator.innerHTML = `${contentWithBreaks}`;
+                } else {
+                    loadingIndicator.innerHTML = result;
+                }
+            }
+        }
+        document.getElementById('send').addEventListener('click', async function () {
+            const input_message = document.getElementById('input-message');
+            const input_prompt = document.getElementById('input-prompt');
+            const message = input_message.value;
+            const prompt = input_prompt.value;
+            input_message.value = '';
+
+            addMessageToChat('User', message);
+
+            const loadingIndicator = showLoadingIndicator();
+            addMessageToChat('MinChunAI', loadingIndicator.outerHTML);
+
+            const data = {
+                messages: [
+                    { role: "system", content: prompt },
+                    { role: "user", content: message }
+                ],
+                temperature: 0.7,
+                max_tokens: -1,
+                stream: true
+            };
+            try {
+                const response = await fetch('http://localhost:1234/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(data),
+                });
+                let completeMessage = '';
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder('utf-8');
+                const processChunk = async ({ done, value }) => {
+                    if (done) {
+                        const end = completeMessage.trim();
+                        clearLoadingIndicator(end);
+                        console.log('Stream completed');
+                        return;
+                    }
+                    let chunkText = decoder.decode(value, { stream: true });
+                    const jsonStart = chunkText.indexOf('{');
+                    if (jsonStart > -1) {
+                        chunkText = chunkText.substring(jsonStart);
+                        try {
+                            const chunkJson = JSON.parse(chunkText);
+                            if (chunkJson.choices && chunkJson.choices.length > 0) {
+                                const content = chunkJson.choices[0].delta.content;
+                                completeMessage += content;
+                            }
+                        } catch (error) {
+                            console.error('Error parsing chunk:', error);
+                        }
+                    }
+                    reader.read().then(processChunk);
+                };
+                reader.read().then(processChunk);
+
+            } catch (error) {
+                console.error('Error:', error);
+            }
+        });
+
+        function addMessageToChat(role, content) {
+            const messagesList = document.getElementById('messages');
+            const newMessage = document.createElement('div');
+            if (role == 'User') newMessage.className = 'user';
+            else newMessage.className = 'system';
+            if (typeof content === 'string') {
+                const contentWithBreaks = content.replace(/\n/g, '<br>');
+                newMessage.innerHTML = `<strong>${role}:</strong><br> <div>${contentWithBreaks}</div>`;
+            } else {
+                newMessage.innerHTML = content;
+            }
+            messagesList.appendChild(newMessage);
+            messagesList.scrollTop = messagesList.scrollHeight;
+        }
+    </script>
+</body>
+
+</html>
